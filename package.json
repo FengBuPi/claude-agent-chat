@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "start": "tsx server.ts",
-    "feishu": "tsx feishu-bot.ts",
     "cli": "tsx cli.ts",
     "dev": "tsx watch server.ts"
   },

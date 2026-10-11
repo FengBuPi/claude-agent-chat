@@ -1,8 +1,6 @@
 // feishu-bot.ts — 飞书长连接收消息，把用户文本交给 Claude Code，再回复到飞书
 import * as lark from "@larksuiteoapi/node-sdk";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { assertAuthEnv, runTurn } from "./chat.ts";
+import { runTurn } from "./chat.ts";
 
 /** 飞书单条文本消息建议控制在此长度内，超出则分段发送 */
 const FEISHU_TEXT_CHUNK = 3500;
@@ -161,14 +159,4 @@ export function startFeishuBot(): void {
   });
 
   console.log("[feishu] 长连接已启动，等待机器人消息…");
-}
-
-// 直接执行本文件时（pnpm feishu）单独启动飞书
-const isDirectRun =
-  !!process.argv[1] &&
-  fileURLToPath(import.meta.url) === resolve(process.argv[1]);
-
-if (isDirectRun) {
-  assertAuthEnv();
-  startFeishuBot();
 }
