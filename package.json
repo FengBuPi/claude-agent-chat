@@ -1,0 +1,24 @@
+{
+  "name": "claude-agent-chat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx server.ts",
+    "feishu": "tsx feishu-bot.ts",
+    "cli": "tsx cli.ts",
+    "dev": "tsx watch server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.295",
+    "@hono/node-server": "^1.19.17",
+    "@larksuiteoapi/node-sdk": "^1.74.0",
+    "dotenv": "^17.2.3",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

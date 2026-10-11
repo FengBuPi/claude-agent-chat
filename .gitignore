@@ -1,0 +1,7 @@
+node_modules/
+.claude-session.json
+.claude-sessions/
+.env
+dist/
+*.log
+.DS_Store
