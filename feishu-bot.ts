@@ -5,8 +5,11 @@ import { runTurn } from "./chat.ts";
 /** 飞书单条文本消息建议控制在此长度内，超出则分段发送 */
 const FEISHU_TEXT_CHUNK = 3500;
 
-/** 「思考中」表情，用作处理中状态（非文本提示） */
-const THINKING_EMOJI = "THINKING";
+/**
+ * 处理中状态表情：蓝色气泡三点（客户端文案「思考中」）。
+ * 注意：THINKING 是黄色思考脸，不是图里那个蓝气泡。
+ */
+const THINKING_EMOJI = "Typing";
 
 type ReceiveMessageEvent = {
   sender: { sender_type?: string };
@@ -101,7 +104,7 @@ export function startFeishuBot(): void {
     loggerLevel: lark.LoggerLevel.info,
   });
 
-  /** 在指定消息上添加 THINKING 表情；失败只打日志，不中断主流程 */
+  /** 在指定消息上添加 Typing（蓝气泡）表情；失败只打日志，不中断主流程 */
   async function addThinkingReaction(messageId: string): Promise<string | undefined> {
     try {
       const res = await client.im.v1.messageReaction.create({
@@ -111,7 +114,7 @@ export function startFeishuBot(): void {
       return res.data?.reaction_id;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.warn("[feishu] 添加 THINKING 表情失败:", message);
+      console.warn("[feishu] 添加 Typing 表情失败:", message);
       return undefined;
     }
   }
@@ -128,7 +131,7 @@ export function startFeishuBot(): void {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.warn("[feishu] 删除 THINKING 表情失败:", message);
+      console.warn("[feishu] 删除 Typing 表情失败:", message);
     }
   }
 
