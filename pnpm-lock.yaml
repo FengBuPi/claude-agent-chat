@@ -15,7 +15,7 @@ importers:
         specifier: ^1.19.17
         version: 1.19.17(hono@4.13.13)
       '@larksuiteoapi/node-sdk':
-        specifier: ^1.55.0
+        specifier: ^1.74.0
         version: 1.74.0(debug@4.4.3)
       dotenv:
         specifier: ^17.2.3

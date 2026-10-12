@@ -17,7 +17,7 @@ const DEFAULT_SESSION_FILE = ".claude-session.json";
 const SESSION_DIR = ".claude-sessions";
 
 export type RunTurnOptions = {
-  /** 会话隔离键（如飞书 chat_id）；不传则用默认单文件 */
+  /** 会话隔离键（如飞书话题：p2p:{chat_id}:thread:{root_id}）；不传则用默认单文件 */
   sessionKey?: string;
 };
 

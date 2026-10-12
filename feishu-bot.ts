@@ -1,9 +1,12 @@
-// feishu-bot.ts — 飞书长连接收消息，把用户文本交给 Claude Code，再回复到飞书
+// feishu-bot.ts — 飞书长连接收消息，把用户文本交给 Claude Code，再在话题内回复
 import * as lark from "@larksuiteoapi/node-sdk";
 import { runTurn } from "./chat.ts";
 
 /** 飞书单条文本消息建议控制在此长度内，超出则分段发送 */
 const FEISHU_TEXT_CHUNK = 3500;
+
+/** 「思考中」表情，用作处理中状态（非文本提示） */
+const THINKING_EMOJI = "THINKING";
 
 type ReceiveMessageEvent = {
   sender: { sender_type?: string };
@@ -13,6 +16,10 @@ type ReceiveMessageEvent = {
     chat_type?: string;
     message_type?: string;
     content: string;
+    /** 话题根消息 id；在话题内续聊时会带上 */
+    root_id?: string;
+    /** 被回复消息 id */
+    parent_id?: string;
     mentions?: Array<{ key: string; name?: string; id?: { open_id?: string } }>;
   };
 };
@@ -48,6 +55,21 @@ function shouldHandle(data: ReceiveMessageEvent): boolean {
   return true;
 }
 
+/** 解析话题根 message_id：有 root_id 用 root，否则本条就是新话题根 */
+function resolveThreadRootId(data: ReceiveMessageEvent): string {
+  return data.message.root_id || data.message.message_id;
+}
+
+/**
+ * 每个飞书话题对应一个 Claude session。
+ * 单聊/群聊都用 chat 类型 + chat_id + 话题根 message_id 隔离。
+ */
+function resolveThreadSessionKey(data: ReceiveMessageEvent): string {
+  const chatType = data.message.chat_type === "group" ? "group" : "p2p";
+  const rootId = resolveThreadRootId(data);
+  return `${chatType}:${data.message.chat_id}:thread:${rootId}`;
+}
+
 /** 按飞书长度限制切分回复文本 */
 function chunkText(text: string): string[] {
   if (text.length <= FEISHU_TEXT_CHUNK) return [text];
@@ -79,28 +101,50 @@ export function startFeishuBot(): void {
     loggerLevel: lark.LoggerLevel.info,
   });
 
-  /** 回复原消息（优先 reply，超长续发到同一会话） */
-  async function replyText(
-    data: ReceiveMessageEvent,
-    text: string,
-  ): Promise<void> {
-    const chunks = chunkText(text || "（Claude 未返回文本）");
+  /** 在指定消息上添加 THINKING 表情；失败只打日志，不中断主流程 */
+  async function addThinkingReaction(messageId: string): Promise<string | undefined> {
+    try {
+      const res = await client.im.v1.messageReaction.create({
+        path: { message_id: messageId },
+        data: { reaction_type: { emoji_type: THINKING_EMOJI } },
+      });
+      return res.data?.reaction_id;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn("[feishu] 添加 THINKING 表情失败:", message);
+      return undefined;
+    }
+  }
 
-    for (const [index, chunk] of chunks.entries()) {
-      const content = JSON.stringify({ text: chunk });
-      if (index === 0) {
-        await client.im.v1.message.reply({
-          path: { message_id: data.message.message_id },
-          data: { content, msg_type: "text" },
-        });
-        continue;
-      }
-      await client.im.v1.message.create({
-        params: { receive_id_type: "chat_id" },
+  /** 删除之前添加的表情；失败只打日志 */
+  async function removeReaction(
+    messageId: string,
+    reactionId: string | undefined,
+  ): Promise<void> {
+    if (!reactionId) return;
+    try {
+      await client.im.v1.messageReaction.delete({
+        path: { message_id: messageId, reaction_id: reactionId },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn("[feishu] 删除 THINKING 表情失败:", message);
+    }
+  }
+
+  /**
+   * 在用户消息的话题内回复（reply_in_thread=true）。
+   * 超长文本分段，每一段都挂在同一条用户消息下。
+   */
+  async function replyInThread(messageId: string, text: string): Promise<void> {
+    const chunks = chunkText(text || "（Claude 未返回文本）");
+    for (const chunk of chunks) {
+      await client.im.v1.message.reply({
+        path: { message_id: messageId },
         data: {
-          receive_id: data.message.chat_id,
-          content,
+          content: JSON.stringify({ text: chunk }),
           msg_type: "text",
+          reply_in_thread: true,
         },
       });
     }
@@ -113,39 +157,34 @@ export function startFeishuBot(): void {
   async function handleMessage(data: ReceiveMessageEvent): Promise<void> {
     if (!shouldHandle(data)) return;
 
+    const userMessageId = data.message.message_id;
     const prompt = extractPrompt(data);
     if (!prompt) {
-      await replyText(data, "目前只支持文本消息，请直接发送文字或 @我 提问。");
+      await replyInThread(
+        userMessageId,
+        "目前只支持文本消息，请直接发送文字或 @我 提问。",
+      );
       return;
     }
 
-    console.log(`[feishu] chat=${data.message.chat_id} prompt=`, prompt);
+    const sessionKey = resolveThreadSessionKey(data);
+    console.log(
+      `[feishu] chat=${data.message.chat_id} thread=${resolveThreadRootId(data)} prompt=`,
+      prompt,
+    );
+
+    // 用表情表示「思考中」，代替文字提示
+    const reactionId = await addThinkingReaction(userMessageId);
 
     try {
-      // 先回复「处理中」，最终答案另发到同一会话（Claude 耗时通常 > 3s）
-      await replyText(data, "收到，正在调用 Claude Code…");
-      const answer = await runTurn(prompt, { sessionKey: data.message.chat_id });
-      for (const chunk of chunkText(answer || "（Claude 未返回文本）")) {
-        await client.im.v1.message.create({
-          params: { receive_id_type: "chat_id" },
-          data: {
-            receive_id: data.message.chat_id,
-            content: JSON.stringify({ text: chunk }),
-            msg_type: "text",
-          },
-        });
-      }
+      const answer = await runTurn(prompt, { sessionKey });
+      await replyInThread(userMessageId, answer);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[feishu] 处理失败:", message);
-      await client.im.v1.message.create({
-        params: { receive_id_type: "chat_id" },
-        data: {
-          receive_id: data.message.chat_id,
-          content: JSON.stringify({ text: `调用 Claude Code 失败：${message}` }),
-          msg_type: "text",
-        },
-      });
+      await replyInThread(userMessageId, `调用 Claude Code 失败：${message}`);
+    } finally {
+      await removeReaction(userMessageId, reactionId);
     }
   }
 
